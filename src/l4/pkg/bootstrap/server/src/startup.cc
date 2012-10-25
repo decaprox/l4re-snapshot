@@ -30,6 +30,7 @@
 #include <ctype.h>
 
 /* L4 stuff */
+#include <l4/bid_config.h>
 #include <l4/sys/compiler.h>
 #include <l4/util/mb_info.h>
 #include <l4/util/l4_macros.h>
@@ -588,6 +589,9 @@ init_regions()
 
   regions.add(Region::n((unsigned long)&_start, (unsigned long)&_end,
               ".bootstrap", Region::Boot));
+#if defined(CONFIG_TZ_REG)
+  regions.add(Region::n(0x80000000, 0x8fffffff, "ns_ram", Region::Arch));
+#endif
 }
 
 

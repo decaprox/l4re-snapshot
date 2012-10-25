@@ -209,6 +209,14 @@ config CPU_ARM_ARMV7R
 
 endchoice
 
+if PLATFORM_TYPE="imx53"
+
+config TZ_REG
+	bool "Enable TZ memory region from 0x80000000"
+	default n
+
+endif
+
 config CPU
 	string
 	default "armv4"    if CPU_ARM_ARMV4
