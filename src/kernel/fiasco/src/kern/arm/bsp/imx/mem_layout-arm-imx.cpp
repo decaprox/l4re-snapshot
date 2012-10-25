@@ -109,6 +109,7 @@ public:
   enum Phys_layout_imx53 {
     Device_phys_base_1   = 0x53f00000,
     Device_phys_base_2   = 0x0ff00000,
+    Device_phys_base_3   = 0x63F00000,
 
     Watchdog_phys_base   = 0x53f98000, // wdog1
     Timer_phys_base      = 0x53fac000, // epit1

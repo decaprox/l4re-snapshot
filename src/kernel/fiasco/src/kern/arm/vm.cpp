@@ -44,26 +44,6 @@ class Vm : public Kobject, public Ref_cnt_obj
       
       Mword pc;
       Mword cpsr;
-
-      Mword pending_events;
-      
-      Mword cp15_ttbr0;
-      Mword cp15_ttbr1;
-      Mword cp15_ttbcr;
-      Mword cp15_vector_base;
-      Mword cp15_dfsr;
-      Mword cp15_dfar;
-      Mword cp15_ifsr;
-      Mword cp15_ifar;
-      Mword cp15_control;
-      Mword cp15_prim_region_remap;
-      Mword cp15_norm_region_remap;
-      Mword cp15_cid;
-      Mword cp15_tls[3];
-      Mword cp10_fpexc;
-
-      Mword pfs;
-      Mword pfa;
       Mword exit_reason;
     };
 
@@ -195,6 +175,8 @@ Vm::run(Syscall_frame *f, Utcb *utcb)
   // set the temporary label for this VM
   Mword label = f->from_spec();
 
+  enable_hw();
+
   while (true)
     {
       Proc::preemption_point();
@@ -269,6 +251,51 @@ Vm::run(Utcb *u)
 {
   return L4_msg_tag(0, 0, 0, 0);
 }
+
+// --------------------------------------------------------------------------
+IMPLEMENTATION [arm && tz && imx53]:
+
+// This dirty code will be rewriten and moved to user-space vmm
+#include "io.h"
+
+enum {
+  AIPSTZ_BASE   = 0xef100000,
+  AISPTZ_MPROT0 = AIPSTZ_BASE + 0x0000,
+  AISPTZ_MPROT1 = AIPSTZ_BASE + 0x0004,
+  AISPTZ_OPACR0 = AIPSTZ_BASE + 0x0040,
+  AISPTZ_OPACR1 = AIPSTZ_BASE + 0x0044,
+  AISPTZ_OPACR2 = AIPSTZ_BASE + 0x0048,
+  AISPTZ_OPACR3 = AIPSTZ_BASE + 0x004C,
+  AISPTZ_OPACR4 = AIPSTZ_BASE + 0x0050,
+  
+  CSU_BASE      = 0xef39C000,
+};
+
+PUBLIC
+void
+Vm::enable_hw()
+{
+  Io::write<Mword>(0x77777777, AISPTZ_MPROT0);
+  Io::write<Mword>(0x77777777, AISPTZ_MPROT1);
+  Io::write<Mword>(0x44444444, AISPTZ_OPACR0);
+  Io::write<Mword>(0x44444444, AISPTZ_OPACR1);
+  Io::write<Mword>(0x44444444, AISPTZ_OPACR2);
+  Io::write<Mword>(0x44444444, AISPTZ_OPACR3);
+  Io::write<Mword>(0x44000000, AISPTZ_OPACR4);
+
+  for (Mword reg = CSU_BASE; reg < CSU_BASE + 0x80; reg += 4)
+  {
+    Io::write<Mword>(0x00FF00FF, reg);
+  }
+}
+
+// --------------------------------------------------------------------------
+IMPLEMENTATION [arm && tz && !imx53]:
+
+PUBLIC
+void
+Vm::enable_hw()
+{}
 
 // --------------------------------------------------------------------------
 IMPLEMENTATION:
@@ -354,13 +381,6 @@ Vm::dump_machine_state()
       jdb_get(&s->sp_und), jdb_get(&s->lr_und), jdb_get(&s->spsr_und));
   printf("svc: sp %08lx lr %08lx psr %08lx\n",
       jdb_get(&s->sp_svc), jdb_get(&s->lr_svc), jdb_get(&s->spsr_svc));
-  printf("cp15_sctlr:%08lx\n", jdb_get(&s->cp15_control));
-  printf("cp15_ttbr0:%08lx\n", jdb_get(&s->cp15_ttbr0));
-  printf("cp15_ttbr1:%08lx\n", jdb_get(&s->cp15_ttbr1));
-  printf("cp15_ttbcr:%08lx\n", jdb_get(&s->cp15_ttbcr));
-  printf("dfar: %08lx dfsr: %08lx ifar: %08lx ifsr: %08lx\n",
-      jdb_get(&s->cp15_dfar), jdb_get(&s->cp15_dfsr), jdb_get(&s->cp15_ifar),
-      jdb_get(&s->cp15_ifsr));
 }
 
 PUBLIC
@@ -386,9 +406,9 @@ unsigned
 Vm::vm_entry_log_fmt(Vm_log *l, int maxlen, char *buf)
 {
   if (l->r0 == 0x1110)
-    return snprintf(buf, maxlen, "entry: pc:%08lx/%03lx intack irq: %lx", l->pc, l->pending_events, l->r1);
+    return snprintf(buf, maxlen, "entry: pc:%08lx intack irq: %lx", l->pc, l->r1);
 
-  return snprintf(buf, maxlen, "entry: pc:%08lx/%03lx r0:%lx", l->pc, l->pending_events, l->r0);
+  return snprintf(buf, maxlen, "entry: pc:%08lx r0:%lx", l->pc, l->r0);
 }
 
 PRIVATE static
@@ -396,17 +416,17 @@ unsigned
 Vm::vm_exit_log_fmt(Vm_log *l, int maxlen, char *buf)
 {
   if ((l->r0 & 0xffff0000) == 0xffff0000)
-    return snprintf(buf, maxlen, "=====: pc:%08lx/%03lx [%04lx]", l->pc, l->pending_events, l->r0 & 0xffff);
+    return snprintf(buf, maxlen, "=====: pc:%08lx [%04lx]", l->pc, l->r0 & 0xffff);
   if (l->r0 == 0x1105)
-    return snprintf(buf, maxlen, "exit:  pc:%08lx/%03lx enable irq: %lx", l->pc, l->pending_events, l->r1);
+    return snprintf(buf, maxlen, "exit:  pc:%08lx enable irq: %lx", l->pc, l->r1);
   if (l->r0 == 0x1109)
-    return snprintf(buf, maxlen, "exit:  pc:%08lx/%03lx disable irq: %lx", l->pc, l->pending_events, l->r1);
+    return snprintf(buf, maxlen, "exit:  pc:%08lx disable irq: %lx", l->pc, l->r1);
   if (l->r0 == 0x1110)
-    return snprintf(buf, maxlen, "exit:  pc:%08lx/%03lx intack", l->pc, l->pending_events);
+    return snprintf(buf, maxlen, "exit:  pc:%08lx intack", l->pc);
   if (l->r0 == 0x1115)
-    return snprintf(buf, maxlen, "exit:  pc:%08lx/%03lx send ipi:%lx", l->pc, l->pending_events, l->r1);
+    return snprintf(buf, maxlen, "exit:  pc:%08lx send ipi:%lx", l->pc, l->r1);
 
-  return snprintf(buf, maxlen, "exit:  pc:%08lx/%03lx r0:%lx", l->pc, l->pending_events, l->r0);
+  return snprintf(buf, maxlen, "exit:  pc:%08lx r0:%lx", l->pc, l->r0);
 }
 
 PUBLIC static inline
@@ -425,7 +445,6 @@ Vm::log_vm(Vm *vm, bool is_entry)
       l->pc = vm->state()->pc;
       l->cpsr = vm->state()->cpsr;
       l->exit_reason = vm->state()->exit_reason;
-      l->pending_events = vm->state()->pending_events;
       l->r0 = vm->state()->r[0];
       l->r1 = vm->state()->r[1];
   );
